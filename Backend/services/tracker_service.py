@@ -35,7 +35,9 @@ def generate_market_alerts(holdings):
             continue
 
         purchase_date = holding.get("purchase_date")
-        purchase_time = holding.get("purchase_time", "09:30")
+        if not purchase_date:
+            purchase_date = datetime.now().strftime("%Y-%m-%d")
+        purchase_time = holding.get("purchase_time") or "09:30"
         invested_amount = holding.get("invested_amount", 50000)
 
         try:
@@ -46,12 +48,15 @@ def generate_market_alerts(holdings):
             invested_amount = 50000.0
 
         try:
-            analysis = analyze_holding(
-                symbol=symbol,
-                purchase_date=purchase_date,
-                purchase_time=purchase_time,
-                invested_amount=invested_amount
-            )
+            if holding.get("current_price") and holding.get("recommendation"):
+                analysis = holding
+            else:
+                analysis = analyze_holding(
+                    symbol=symbol,
+                    purchase_date=purchase_date,
+                    purchase_time=purchase_time,
+                    invested_amount=invested_amount
+                )
 
             rec = analysis.get("recommendation", {})
             signal = rec.get("signal", "HOLD")

@@ -1,4 +1,5 @@
 
+from datetime import datetime
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import yfinance as yf
@@ -318,7 +319,7 @@ def tracker_monitor():
             "success": True,
             "alerts": alerts,
             "total_alerts": len(alerts),
-            "timestamp": str(yf.utils.get_json or "")
+            "timestamp": datetime.now().isoformat()
         })
 
     except Exception as error:

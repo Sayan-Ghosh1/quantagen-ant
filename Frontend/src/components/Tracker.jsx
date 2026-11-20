@@ -67,6 +67,57 @@ function getStockDetails(stock) {
   };
 }
 
+function formatAlertsFromAnalysis(holdingsList) {
+  if (!Array.isArray(holdingsList) || holdingsList.length === 0) return [];
+  return holdingsList.map((item, index) => {
+    const symbol = item.symbol || "UNKNOWN";
+    const currentPrice = Number(item.current_price || 0);
+    const purchasePrice = Number(item.purchase_price || 0);
+    const pnl = Number(item.profit_loss_percent || 0);
+    const rec = item.recommendation || {};
+    const signal = rec.signal || item.signal || "HOLD";
+    const actionType = item.action_type || rec.action_type || "TREND_HOLD";
+    const targetPrice = item.target_price || rec.target_price || (currentPrice * 1.05);
+    const stopLossPrice = item.stop_loss_price || rec.stop_loss_price || (currentPrice * 0.95);
+    const confidence = item.confidence_score || rec.confidence_score || 75;
+    const reasons = rec.reasons || item.reasons || [];
+
+    let title = `Position Status: ${symbol} in ${signal} Zone`;
+    let message = `${symbol} is trading at ₹${currentPrice.toFixed(2)} (${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}%).`;
+
+    if (actionType === "TAKE_PROFIT" || (signal === "SELL" && pnl > 0)) {
+      title = `Take-Profit Target Opportunity for ${symbol}`;
+      message = `${symbol} gained +${pnl.toFixed(2)}% to ₹${currentPrice.toFixed(2)}. Model 2 detected resistance near target ₹${Number(targetPrice).toFixed(2)}. Consider taking profit or trailing stop.`;
+    } else if (actionType === "STOP_LOSS" || (signal === "SELL" && pnl < 0)) {
+      title = `Risk Alert: Protective Exit for ${symbol}`;
+      message = `${symbol} is in drawdown (${pnl.toFixed(2)}%) at ₹${currentPrice.toFixed(2)}, nearing stop-loss ₹${Number(stopLossPrice).toFixed(2)}. Model 2 advises risk management.`;
+    } else if (actionType === "MOMENTUM_BUY" || signal === "BUY") {
+      title = `Bullish Momentum Signal on ${symbol}`;
+      message = `Model 2 detects strong momentum on ${symbol} with price above key moving averages. Upside target: ₹${Number(targetPrice).toFixed(2)}.`;
+    } else {
+      title = `Position Monitored: ${symbol} Holding Steady`;
+      message = `${symbol} is stable at ₹${currentPrice.toFixed(2)} (${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}%). Next upside target: ₹${Number(targetPrice).toFixed(2)} | Stop-Loss: ₹${Number(stopLossPrice).toFixed(2)}.`;
+    }
+
+    return {
+      id: `alert-${symbol}-${index}-${Date.now()}`,
+      symbol,
+      signal,
+      action_type: actionType,
+      title,
+      message,
+      current_price: currentPrice,
+      purchase_price: purchasePrice,
+      pnl_percent: pnl,
+      target_price: targetPrice,
+      stop_loss_price: stopLossPrice,
+      confidence,
+      reasons: reasons.slice(0, 2),
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+  });
+}
+
 function Tracker({ userId }) {
   const [holdings, setHoldings] = useState([
     {
@@ -102,16 +153,27 @@ function Tracker({ userId }) {
         invested_amount: Number(h.invested_amount),
       }));
 
-    if (!valid.length) return;
+    if (!valid.length) {
+      if (result?.holdings?.length) {
+        setAlerts(formatAlertsFromAnalysis(result.holdings));
+        setLastChecked(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      }
+      return;
+    }
 
     try {
       setMonitoring(true);
       const generatedAlerts = await monitorHoldings(valid);
-      setAlerts(generatedAlerts);
-      setLastChecked(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      if (Array.isArray(generatedAlerts) && generatedAlerts.length > 0) {
+        setAlerts(generatedAlerts);
+        setLastChecked(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      } else if (result?.holdings?.length) {
+        setAlerts(formatAlertsFromAnalysis(result.holdings));
+        setLastChecked(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      }
 
       // Attempt to save notification records into Supabase if table exists
-      if (userId && generatedAlerts.length) {
+      if (userId && generatedAlerts?.length) {
         try {
           const rows = generatedAlerts.map((a) => ({
             user_id: userId,
@@ -129,10 +191,25 @@ function Tracker({ userId }) {
       }
     } catch (err) {
       console.error("Live market scan error:", err);
+      // Fallback: If result has holdings, immediately show alerts
+      if (result?.holdings?.length) {
+        setAlerts(formatAlertsFromAnalysis(result.holdings));
+        setLastChecked(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      }
     } finally {
       setMonitoring(false);
     }
   };
+
+  // Keep live strategy alerts synchronized with analyzed holdings
+  useEffect(() => {
+    if (result?.holdings?.length > 0 && alerts.length === 0) {
+      setAlerts(formatAlertsFromAnalysis(result.holdings));
+      if (!lastChecked) {
+        setLastChecked(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      }
+    }
+  }, [result, alerts.length, lastChecked]);
 
   useEffect(() => {
     let cancelled = false;
@@ -292,6 +369,10 @@ function Tracker({ userId }) {
     try {
       const data = await analyzeTracker(validHoldings);
       setResult(data);
+      if (Array.isArray(data?.holdings) && data.holdings.length > 0) {
+        setAlerts(formatAlertsFromAnalysis(data.holdings));
+        setLastChecked(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      }
       const rows = validHoldings.map((item) => ({
         user_id: userId,
         symbol: item.symbol,
