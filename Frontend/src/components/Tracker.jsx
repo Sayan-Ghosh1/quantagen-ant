@@ -77,26 +77,34 @@ function formatAlertsFromAnalysis(holdingsList) {
     const rec = item.recommendation || {};
     const signal = rec.signal || item.signal || "HOLD";
     const actionType = item.action_type || rec.action_type || "TREND_HOLD";
-    const targetPrice = item.target_price || rec.target_price || (currentPrice * 1.05);
-    const stopLossPrice = item.stop_loss_price || rec.stop_loss_price || (currentPrice * 0.95);
-    const confidence = item.confidence_score || rec.confidence_score || 75;
+    const targetPrice = Number(item.target_price || rec.target_price || (currentPrice * 1.18));
+    const stopLossPrice = Number(item.stop_loss_price || rec.stop_loss_price || (currentPrice * 0.92));
+    const targetUpside = item.target_upside_percent || rec.target_upside_percent || (currentPrice > 0 ? Math.round(((targetPrice - currentPrice) / currentPrice) * 1000) / 10 : 18.0);
+    const stopRisk = item.stop_loss_risk_percent || rec.stop_loss_risk_percent || (currentPrice > 0 ? Math.round(((stopLossPrice - currentPrice) / currentPrice) * 1000) / 10 : -8.0);
+    const confidence = item.confidence_score || rec.confidence_score || 85;
     const reasons = rec.reasons || item.reasons || [];
 
-    let title = `Position Status: ${symbol} in ${signal} Zone`;
-    let message = `${symbol} is trading at ₹${currentPrice.toFixed(2)} (${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}%).`;
+    let title = `Positional HOLD: ${symbol} Trend Intact`;
+    let message = `${symbol} is holding steady at ₹${currentPrice.toFixed(2)} (${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}%). 1–3 Month Target: ₹${targetPrice.toFixed(2)} (+${targetUpside}%) | Positional Stop: ₹${stopLossPrice.toFixed(2)} (${stopRisk}%).`;
 
-    if (actionType === "TAKE_PROFIT" || (signal === "SELL" && pnl > 0)) {
-      title = `Take-Profit Target Opportunity for ${symbol}`;
-      message = `${symbol} gained +${pnl.toFixed(2)}% to ₹${currentPrice.toFixed(2)}. Model 2 detected resistance near target ₹${Number(targetPrice).toFixed(2)}. Consider taking profit or trailing stop.`;
-    } else if (actionType === "STOP_LOSS" || (signal === "SELL" && pnl < 0)) {
-      title = `Risk Alert: Protective Exit for ${symbol}`;
-      message = `${symbol} is in drawdown (${pnl.toFixed(2)}%) at ₹${currentPrice.toFixed(2)}, nearing stop-loss ₹${Number(stopLossPrice).toFixed(2)}. Model 2 advises risk management.`;
-    } else if (actionType === "MOMENTUM_BUY" || signal === "BUY") {
-      title = `Bullish Momentum Signal on ${symbol}`;
-      message = `Model 2 detects strong momentum on ${symbol} with price above key moving averages. Upside target: ₹${Number(targetPrice).toFixed(2)}.`;
-    } else {
-      title = `Position Monitored: ${symbol} Holding Steady`;
-      message = `${symbol} is stable at ₹${currentPrice.toFixed(2)} (${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}%). Next upside target: ₹${Number(targetPrice).toFixed(2)} | Stop-Loss: ₹${Number(stopLossPrice).toFixed(2)}.`;
+    if (actionType === "RIDE_MOMENTUM_RUN" || (actionType.includes("RIDE") && pnl >= 10)) {
+      title = `Bullish Surge: ${symbol} Momentum Active`;
+      message = `${symbol} surged +${pnl.toFixed(2)}% to ₹${currentPrice.toFixed(2)}. Strong buying momentum active. Ride the trend toward target ₹${targetPrice.toFixed(2)} (+${targetUpside}%) with protective trailing stop locked at ₹${stopLossPrice.toFixed(2)}.`;
+    } else if (actionType.includes("TAKE_PROFIT") || (signal === "SELL" && pnl >= 15)) {
+      title = `Mid-Term Target Zone: ${symbol}`;
+      message = `${symbol} gained +${pnl.toFixed(2)}% to ₹${currentPrice.toFixed(2)}. Model 2 detects target profit zone reached. Consider locking in partial gains or trailing stop.`;
+    } else if (actionType.includes("STOP_LOSS") || (signal === "SELL" && pnl < 0)) {
+      title = `Positional Stop-Loss Alert: ${symbol}`;
+      message = `${symbol} has reached ${pnl.toFixed(2)}% drawdown at ₹${currentPrice.toFixed(2)}, breaching multi-week support (₹${stopLossPrice.toFixed(2)}). Model 2 advises protective exit.`;
+    } else if (actionType.includes("BREAKDOWN")) {
+      title = `Macro Trend Weakening: ${symbol}`;
+      message = `${symbol} has broken below key moving averages at ₹${currentPrice.toFixed(2)}. Model 2 signals exit to avoid prolonged mid-term underperformance.`;
+    } else if (actionType.includes("BREAKOUT") || actionType === "MOMENTUM_BUY" || signal === "BUY") {
+      title = `Mid-Term Breakout Buy: ${symbol}`;
+      message = `Model 2 detects strong multi-week accumulation on ${symbol} with price above key 50D/100D moving averages. Upside target: ₹${targetPrice.toFixed(2)} (+${targetUpside}%).`;
+    } else if (actionType.includes("ACCUMULATE")) {
+      title = `Accumulation Opportunity: ${symbol}`;
+      message = `${symbol} is in a healthy pullback near 50-day support at ₹${currentPrice.toFixed(2)}. Favorable risk-reward for mid-term positioning toward ₹${targetPrice.toFixed(2)} (+${targetUpside}%).`;
     }
 
     return {
@@ -104,13 +112,16 @@ function formatAlertsFromAnalysis(holdingsList) {
       symbol,
       signal,
       action_type: actionType,
+      horizon: "Mid/Long-Term (1–3 Months)",
       title,
       message,
       current_price: currentPrice,
       purchase_price: purchasePrice,
       pnl_percent: pnl,
       target_price: targetPrice,
+      target_upside_percent: targetUpside,
       stop_loss_price: stopLossPrice,
+      stop_loss_risk_percent: stopRisk,
       confidence,
       reasons: reasons.slice(0, 2),
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
@@ -141,6 +152,21 @@ function Tracker({ userId }) {
   const [alerts, setAlerts] = useState([]);
   const [monitoring, setMonitoring] = useState(false);
   const [lastChecked, setLastChecked] = useState(null);
+  const [countdown, setCountdown] = useState(60);
+
+  // 1-minute auto-refresh timer (continuous background monitoring)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          scanMarketChanges();
+          return 60;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [holdings, result]);
 
   const scanMarketChanges = async (targetHoldings) => {
     const list = targetHoldings || holdings;
@@ -450,15 +476,15 @@ function Tracker({ userId }) {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => scanMarketChanges()}
-              disabled={monitoring}
-              className="flex items-center justify-center gap-2 rounded-xl border border-emerald-300/30 bg-emerald-300/10 px-4 py-2.5 text-xs font-bold text-emerald-300 transition hover:bg-emerald-300/20 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <RefreshCw size={14} className={monitoring ? "animate-spin" : ""} />
-              {monitoring ? "Scanning Market..." : "Scan Market Now"}
-            </button>
+            <div className="flex items-center gap-2.5 rounded-full border border-emerald-300/20 bg-emerald-300/[0.06] px-4 py-2 text-xs font-semibold text-emerald-300 shadow-sm">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+              </span>
+              <span>
+                {monitoring ? "Updating live prices..." : `Auto-refresh in ${countdown}s`}
+              </span>
+            </div>
           </div>
 
           {/* ALERTS CARDS */}
@@ -889,22 +915,72 @@ function SummaryCard({ label, value, positive }) {
   );
 }
 
+function getBadgeDetails(signal, actionType = "", pnl = 0) {
+  const pnlNum = Number(pnl || 0);
+  const typeStr = String(actionType || "").toUpperCase();
+  const sigStr = String(signal || "HOLD").toUpperCase();
+
+  // 1. High profit / Surging stock (e.g. +20% Upper Circuit)
+  if (typeStr === "RIDE_MOMENTUM_RUN" || (typeStr.includes("RIDE") && pnlNum >= 10) || (sigStr === "HOLD" && pnlNum >= 12)) {
+    return {
+      style: "border-emerald-400/40 bg-emerald-500/15 text-emerald-300 shadow-sm",
+      icon: TrendingUp,
+      label: "RIDE THE TREND (TRAILING STOP)",
+    };
+  }
+
+  // 2. Profit-taking signals
+  if (typeStr.includes("TAKE_PROFIT") || (sigStr === "SELL" && pnlNum > 0)) {
+    return {
+      style: "border-purple-400/30 bg-purple-500/10 text-purple-300",
+      icon: TrendingUp,
+      label: "TAKE PROFIT (LOCK GAINS)",
+    };
+  }
+
+  // 3. Positional Breakout or Dip Accumulation
+  if (sigStr === "BUY" || typeStr.includes("BREAKOUT") || typeStr.includes("ACCUMULATE")) {
+    return {
+      style: "border-emerald-300/30 bg-emerald-500/10 text-emerald-300",
+      icon: TrendingUp,
+      label: typeStr.includes("ACCUMULATE") ? "ACCUMULATE ON DIP" : "BUY / ACCUMULATE",
+    };
+  }
+
+  // 4. Trend Weakening / Breakdown
+  if (typeStr.includes("BREAKDOWN")) {
+    return {
+      style: "border-amber-400/30 bg-amber-500/10 text-amber-300",
+      icon: TrendingDown,
+      label: "TREND BREAKDOWN / EXIT",
+    };
+  }
+
+  // 5. Protective Stop-Loss (losing position drawdown)
+  if (sigStr === "SELL" || typeStr.includes("STOP_LOSS") || typeStr.includes("PRESERVATION")) {
+    return {
+      style: "border-rose-400/30 bg-rose-500/10 text-rose-300",
+      icon: TrendingDown,
+      label: pnlNum <= 0 ? "STOP LOSS / EXIT" : "EXIT POSITION",
+    };
+  }
+
+  // 6. Default: Healthy trend hold
+  return {
+    style: "border-amber-300/30 bg-amber-500/10 text-amber-200",
+    icon: Minus,
+    label: "HOLD POSITION",
+  };
+}
+
 function HoldingCard({ item }) {
   const recommendation = item.recommendation || {};
   const signal = recommendation.signal || "HOLD";
+  const actionType = recommendation.action_type || item.action_type || "";
+  const pnl = Number(item.profit_loss_percent || 0);
 
-  const signalStyle = {
-    BUY: "border-emerald-300/20 bg-emerald-300/10 text-emerald-300",
-    HOLD: "border-yellow-300/20 bg-yellow-300/10 text-yellow-200",
-    SELL: "border-red-300/20 bg-red-300/10 text-red-300",
-  };
-
-  const SignalIcon =
-    signal === "BUY"
-      ? TrendingUp
-      : signal === "SELL"
-      ? TrendingDown
-      : Minus;
+  const badge = getBadgeDetails(signal, actionType, pnl);
+  const BadgeIcon = badge.icon;
 
   const technical = item.technical_indicators || {};
   const additional = item.additional_investment || {};
@@ -930,6 +1006,10 @@ function HoldingCard({ item }) {
         </div>
 
         <div className="flex items-center gap-2">
+          <span className="rounded-full border border-emerald-300/20 bg-emerald-300/[0.06] px-2.5 py-1 text-[10px] font-bold text-emerald-300">
+            {item.horizon || "1–3M Horizon"}
+          </span>
+
           {item.action_type && (
             <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white/60">
               {item.action_type.replace(/_/g, " ")}
@@ -937,12 +1017,12 @@ function HoldingCard({ item }) {
           )}
 
           <div
-            className={`flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-bold ${
-              signalStyle[signal] || signalStyle.HOLD
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+              badge.style
             }`}
           >
-            <SignalIcon size={14} />
-            {signal}
+            <BadgeIcon size={12} />
+            {badge.label}
           </div>
         </div>
       </div>
@@ -974,14 +1054,14 @@ function HoldingCard({ item }) {
         />
 
         <Metric
-          label="Model 2 Target (₹)"
-          value={item.target_price ? formatMoney(item.target_price) : "—"}
+          label="Mid/Long-Term Target (₹)"
+          value={item.target_price ? `${formatMoney(item.target_price)} (+${item.target_upside_percent || 18}%)` : "—"}
           color="text-emerald-300"
         />
 
         <Metric
-          label="Model 2 Stop-Loss (₹)"
-          value={item.stop_loss_price ? formatMoney(item.stop_loss_price) : "—"}
+          label="Positional Stop-Loss (₹)"
+          value={item.stop_loss_price ? `${formatMoney(item.stop_loss_price)} (${item.stop_loss_risk_percent || -8}%)` : "—"}
           color="text-rose-300"
         />
 
@@ -992,13 +1072,9 @@ function HoldingCard({ item }) {
         />
 
         <Metric
-          label="Predicted 3-day return"
-          value={`${Number(item.predicted_return_percent) > 0 ? "+" : ""}${item.predicted_return_percent ?? 0}%`}
-          color={
-            Number(item.predicted_return_percent) >= 0
-              ? "text-emerald-300"
-              : "text-red-300"
-          }
+          label="Positional Horizon"
+          value={item.horizon || "1–3 Months"}
+          color="text-white/80"
         />
       </div>
 
@@ -1150,28 +1226,7 @@ function AlertNotificationCard({ alert }) {
   const actionType = alert.action_type || "TREND_HOLD";
   const pnl = Number(alert.pnl_percent || 0);
 
-  const badgeConfig = {
-    BUY: {
-      style: "border-emerald-300/30 bg-emerald-300/10 text-emerald-300",
-      icon: TrendingUp,
-      label: actionType === "MOMENTUM_BUY" ? "BUY / ACCUMULATE" : "BUY SIGNAL",
-    },
-    SELL: {
-      style:
-        actionType === "TAKE_PROFIT"
-          ? "border-purple-300/30 bg-purple-300/10 text-purple-300"
-          : "border-rose-400/30 bg-rose-400/10 text-rose-300",
-      icon: TrendingDown,
-      label: actionType === "TAKE_PROFIT" ? "TAKE PROFIT / SELL" : "STOP LOSS / SELL",
-    },
-    HOLD: {
-      style: "border-amber-300/30 bg-amber-300/10 text-amber-200",
-      icon: Minus,
-      label: "HOLD POSITION",
-    },
-  };
-
-  const badge = badgeConfig[signal] || badgeConfig.HOLD;
+  const badge = getBadgeDetails(signal, actionType, pnl);
   const BadgeIcon = badge.icon;
 
   return (
@@ -1183,6 +1238,9 @@ function AlertNotificationCard({ alert }) {
           </span>
           <span className={`text-xs font-bold ${pnl >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
             {pnl >= 0 ? `+${pnl}%` : `${pnl}%`}
+          </span>
+          <span className="rounded-md border border-emerald-300/20 bg-emerald-300/[0.05] px-2 py-0.5 text-[9px] font-semibold text-emerald-300/80">
+            {alert.horizon || "1–3M Horizon"}
           </span>
         </div>
 
@@ -1207,12 +1265,22 @@ function AlertNotificationCard({ alert }) {
           <p className="mt-0.5 text-xs font-bold text-white">{formatMoney(alert.current_price)}</p>
         </div>
         <div>
-          <p className="text-[9px] uppercase tracking-wider text-emerald-300/70">Target (₹)</p>
-          <p className="mt-0.5 text-xs font-bold text-emerald-300">{formatMoney(alert.target_price)}</p>
+          <p className="text-[9px] uppercase tracking-wider text-emerald-300/80">Mid/Long-Term Target</p>
+          <p className="mt-0.5 text-xs font-bold text-emerald-300">
+            {formatMoney(alert.target_price)}
+            <span className="ml-1 text-[10px] font-medium text-emerald-400">
+              (+{alert.target_upside_percent || 18}%)
+            </span>
+          </p>
         </div>
         <div>
-          <p className="text-[9px] uppercase tracking-wider text-rose-300/70">Stop-Loss (₹)</p>
-          <p className="mt-0.5 text-xs font-bold text-rose-300">{formatMoney(alert.stop_loss_price)}</p>
+          <p className="text-[9px] uppercase tracking-wider text-rose-300/80">Positional Stop-Loss</p>
+          <p className="mt-0.5 text-xs font-bold text-rose-300">
+            {formatMoney(alert.stop_loss_price)}
+            <span className="ml-1 text-[10px] font-medium text-rose-400">
+              ({alert.stop_loss_risk_percent || -8}%)
+            </span>
+          </p>
         </div>
       </div>
 

@@ -394,10 +394,13 @@ def analyze_holding(symbol, purchase_date, purchase_time, invested_amount):
     recommendation = {
         "signal": position_eval["signal"],
         "action_type": position_eval["action_type"],
+        "horizon": position_eval.get("horizon", "Mid/Long-Term (1–3 Months)"),
         "confidence_score": position_eval["confidence_score"],
         "agreement_score": position_eval["confidence_score"],
         "target_price": position_eval["target_price"],
+        "target_upside_percent": position_eval.get("target_upside_percent", 18.0),
         "stop_loss_price": position_eval["stop_loss_price"],
+        "stop_loss_risk_percent": position_eval.get("stop_loss_risk_percent", -8.0),
         "probabilities": position_eval["probabilities"],
         "model_name": position_eval["model_name"],
         "reasons": position_eval["reasons"],
@@ -432,6 +435,15 @@ def analyze_holding(symbol, purchase_date, purchase_time, invested_amount):
         "profit_loss": round(profit_loss, 2),
         "profit_loss_percent": round(profit_loss_percent, 2),
 
+        "horizon": recommendation["horizon"],
+        "target_price": recommendation["target_price"],
+        "target_upside_percent": recommendation["target_upside_percent"],
+        "stop_loss_price": recommendation["stop_loss_price"],
+        "stop_loss_risk_percent": recommendation["stop_loss_risk_percent"],
+        "confidence_score": recommendation["confidence_score"],
+        "action_type": recommendation["action_type"],
+        "model_name": recommendation["model_name"],
+
         "prediction_days": ml_result["prediction_days"],
         "predicted_return_percent": round(
             float(ml_result["predicted_return_percent"]), 2
@@ -450,11 +462,6 @@ def analyze_holding(symbol, purchase_date, purchase_time, invested_amount):
         },
 
         "recommendation": recommendation,
-        "target_price": recommendation["target_price"],
-        "stop_loss_price": recommendation["stop_loss_price"],
-        "confidence_score": recommendation["confidence_score"],
-        "action_type": recommendation["action_type"],
-        "model_name": recommendation["model_name"],
 
         "additional_investment": {
             "suggested": add_more,

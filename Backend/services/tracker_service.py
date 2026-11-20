@@ -69,42 +69,60 @@ def generate_market_alerts(holdings):
             pnl_pct = analysis.get("profit_loss_percent", 0.0)
             reasons = rec.get("reasons", [])
 
-            # Generate tailored notification title & message
-            if action_type == "TAKE_PROFIT":
-                title = f"Take-Profit Opportunity on {symbol}"
+            target_upside = round(((target - current_price) / current_price) * 100, 1) if current_price else 18.0
+            stop_risk = round(((stop_loss - current_price) / current_price) * 100, 1) if current_price else -8.0
+
+            # Generate tailored notification title & message for mid/long-term positional investors
+            if action_type == "RIDE_MOMENTUM_RUN" or (action_type.startswith("RIDE") and pnl_pct >= 10.0):
+                title = f"Bullish Surge: {symbol} Momentum Active"
+                message = (
+                    f"{symbol} surged +{pnl_pct}% to ₹{current_price}. "
+                    f"Strong buying momentum active. Ride the trend toward target ₹{target} (+{target_upside}%) "
+                    f"with protective trailing stop locked at ₹{stop_loss}."
+                )
+                severity = "success"
+            elif action_type in ["TAKE_PROFIT", "TRIM_TAKE_PROFIT"]:
+                title = f"Mid-Term Target Zone: {symbol}"
                 message = (
                     f"{symbol} has gained +{pnl_pct}% to ₹{current_price}. "
-                    f"Model 2 detected overbought resistance near target ₹{target}. "
-                    f"Consider locking in profits or trailing your stop."
+                    f"Model 2 detects profit target reached near ₹{target}. "
+                    f"Consider taking partial gains or trailing your stop-loss."
                 )
                 severity = "warning"
-            elif action_type in ["STOP_LOSS", "CAPITAL_PRESERVATION_EXIT"]:
-                title = f"Risk Alert: Stop-Loss Triggered for {symbol}"
+            elif action_type in ["STOP_LOSS", "STOP_LOSS_EXIT", "CAPITAL_PRESERVATION_EXIT"]:
+                title = f"Positional Stop-Loss Alert: {symbol}"
                 message = (
-                    f"{symbol} has dropped {pnl_pct}% to ₹{current_price}, "
-                    f"breaching the protective threshold ₹{stop_loss}. "
-                    f"Model 2 advises exiting to protect remaining capital."
+                    f"{symbol} is at ₹{current_price} ({pnl_pct}%), "
+                    f"breaching the structural support threshold ₹{stop_loss} ({stop_risk}%). "
+                    f"Model 2 advises capital preservation."
                 )
                 severity = "critical"
-            elif action_type == "MOMENTUM_BUY":
-                title = f"Buy / Accumulate Signal on {symbol}"
+            elif action_type in ["STRONG_BUY_BREAKOUT", "MOMENTUM_BUY"]:
+                title = f"Mid-Term Breakout Buy: {symbol}"
                 message = (
-                    f"Strong bullish momentum on {symbol} at ₹{current_price}. "
-                    f"Price is trading above key moving averages with target set to ₹{target}."
+                    f"Strong multi-week breakout on {symbol} at ₹{current_price}. "
+                    f"Trading above 50D/100D SMAs with 1–3 month target ₹{target} (+{target_upside}%)."
+                )
+                severity = "success"
+            elif action_type == "ACCUMULATE_DIP":
+                title = f"Accumulation Opportunity: {symbol}"
+                message = (
+                    f"{symbol} is in a healthy pullback near 50-day support at ₹{current_price}. "
+                    f"High-probability accumulation setup toward mid-term target ₹{target} (+{target_upside}%)."
                 )
                 severity = "success"
             elif action_type == "BREAKDOWN_SELL":
-                title = f"Trend Weakening Alert on {symbol}"
+                title = f"Macro Trend Weakening: {symbol}"
                 message = (
-                    f"{symbol} is under technical pressure below 50-day SMA. "
-                    f"Model 2 signals SELL to prevent further drawdown."
+                    f"{symbol} has broken below 50D/100D moving averages at ₹{current_price}. "
+                    f"Model 2 signals exit to avoid prolonged mid-term underperformance."
                 )
                 severity = "warning"
             else:
-                title = f"Position Stable: {symbol} in HOLD Zone"
+                title = f"Positional HOLD: {symbol} Trend Intact"
                 message = (
                     f"{symbol} is holding steady at ₹{current_price} ({'+' if pnl_pct >= 0 else ''}{pnl_pct}%). "
-                    f"Next upside target: ₹{target} | Stop-loss: ₹{stop_loss}."
+                    f"1–3 Month Target: ₹{target} (+{target_upside}%) | Positional Stop: ₹{stop_loss} ({stop_risk}%)."
                 )
                 severity = "info"
 
@@ -115,13 +133,16 @@ def generate_market_alerts(holdings):
                 "symbol": symbol,
                 "signal": signal,
                 "action_type": action_type,
+                "horizon": "Mid/Long-Term (1–3 Months)",
                 "title": title,
                 "message": message,
                 "current_price": current_price,
                 "purchase_price": purchase_price,
                 "pnl_percent": pnl_pct,
                 "target_price": target,
+                "target_upside_percent": target_upside,
                 "stop_loss_price": stop_loss,
+                "stop_loss_risk_percent": stop_risk,
                 "confidence": confidence,
                 "severity": severity,
                 "reasons": reasons[:2],
